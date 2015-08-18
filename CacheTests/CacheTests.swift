@@ -70,5 +70,17 @@ class CacheTests: XCTestCase {
         XCTAssertNotNil(a)
         XCTAssertEqual(a!, 10)
         XCTAssertEqual(cache.memorySize, sizeof(Int))
+        cache.invalidate()
+    }
+
+    func testNSDataCacheable() {
+        let cache = Cache(name: "test")
+        let data = "hello".dataUsingEncoding(NSUTF8StringEncoding)!
+        cache.set("a", value: data)
+        let cacheb = Cache(name: "test")
+        let out: NSData? = cacheb.get("a")
+        XCTAssertNotNil(out)
+        XCTAssertEqual(out!, data)
+        cache.invalidate()
     }
 }

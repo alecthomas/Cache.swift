@@ -114,7 +114,7 @@ public class Cache {
             if let v = self.cache[key] {
                 value = v as? T
             } else if let entry = self.metadata[key], let data = NSData(contentsOfFile: self.pathForKey(key)) {
-                value = T.decodeFromCache(data) as! T?
+                value = T.decodeFromCache(data) as? T
                 if value != nil {
                     self.cache[key] = value!
                     self.memorySize += entry.size
@@ -130,7 +130,7 @@ public class Cache {
             let data = value.encodeForCache()
             let path = self.pathForKey(key)
             data.writeToFile(path, atomically: true)
-            self.setValueWithPath(key, value: value, path: path, size: Int(data.length))
+            self.setValueWithPath(key, value: value, path: path, size: data.length)
         })
     }
 
@@ -279,5 +279,16 @@ extension NSCoder: Cacheable {
 
     public static func decodeFromCache(data: NSData) -> Any? {
         return NSKeyedUnarchiver(forReadingWithData: data).decodeObject()
+    }
+}
+
+
+extension NSData: Cacheable {
+    public func encodeForCache() -> NSData {
+        return self
+    }
+
+    public static func decodeFromCache(data: NSData) -> Any? {
+        return data
     }
 }
