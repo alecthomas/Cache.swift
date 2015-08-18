@@ -53,7 +53,6 @@ public class Cache {
     }
 
     internal let fileManager = NSFileManager.defaultManager()
-    internal let background = dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0)
     internal let queue = dispatch_queue_create("com.compass.Cache", DISPATCH_QUEUE_SERIAL)
     internal let root: String
     internal var metadata: [String:CacheEntry] = [:]
@@ -86,7 +85,7 @@ public class Cache {
         self.maybePurge()
 
 #if os(iOS)
-        let notifications = NSNotificationCenter.defaultCenter().addObserverForName(UIApplicationDidReceiveMemoryWarningNotification,
+        NSNotificationCenter.defaultCenter().addObserverForName(UIApplicationDidReceiveMemoryWarningNotification,
             object: nil,
             queue: NSOperationQueue.mainQueue(),
             usingBlock: {notification in self.onMemoryWarning() })
@@ -190,7 +189,7 @@ public class Cache {
     }
     
     private func purgeCache() {
-        NSFileManager.defaultManager().removeItemAtPath(self.root, error: nil)
+        fileManager.removeItemAtPath(self.root, error: nil)
         self.metadata = [:]
         self.cache = [:]
         self.memorySize = 0
