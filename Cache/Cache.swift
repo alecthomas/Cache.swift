@@ -32,7 +32,7 @@ public class Cache {
         public var diskByteLimit: Int
 
         // Used to return a cost for the entry. Lower cost objects will be evicted first.
-        // Defaults to time-based cost, where older entries have a higher cost.
+        // Defaults to time-based cost, where older entries have a lower cost.
         public var costFunction: CostFunction
 
         public init(
@@ -46,10 +46,16 @@ public class Cache {
         }
     }
 
-    public struct CacheEntry {
-        let key: String
-        let ctime: NSTimeInterval
-        let size: Int
+    public class CacheEntry {
+        public let key: String
+        public let ctime: NSTimeInterval
+        public let size: Int
+
+        public init(key: String, ctime: NSTimeInterval, size: Int) {
+            self.key = key
+            self.ctime = ctime
+            self.size = size
+        }
     }
 
     internal let fileManager = NSFileManager.defaultManager()
@@ -104,6 +110,15 @@ public class Cache {
         var out: [String] = []
         dispatch_sync(queue, { out = self.cache.keys.array.sorted({a, b in a < b}) })
         return out
+    }
+
+    // Check if key is cached.
+    public func exists(key: String) -> Bool {
+        var ok = false
+        dispatch_sync(queue, {
+            ok = self.metadata[key] != nil
+        })
+        return ok
     }
 
     // Get an object from the cache.
@@ -205,19 +220,21 @@ public class Cache {
 
     // Must be called in the lock queue.
     private func maybePurge() {
-        if memorySize > options.memoryByteLimit || diskSize > options.diskByteLimit {
-            let entries = self.metadata.values.array.sorted({(a, b) in
-                self.options.costFunction(a) < self.options.costFunction(b)
-            })
-            for entry in entries {
-                if diskSize > options.diskByteLimit {
-                    purgeKey(entry.key)
-                } else if memorySize > options.memoryByteLimit {
-                    cache.removeValueForKey(entry.key)
-                    memorySize -= entry.size
-                } else {
-                    break
-                }
+        if memorySize <= options.memoryByteLimit && diskSize <= options.diskByteLimit {
+            return
+        }
+
+        let entries = self.metadata.values.array.sorted({(a, b) in
+            self.options.costFunction(a) < self.options.costFunction(b)
+        })
+        for entry in entries {
+            if diskSize > options.diskByteLimit {
+                purgeKey(entry.key)
+            } else if memorySize > options.memoryByteLimit {
+                cache.removeValueForKey(entry.key)
+                memorySize -= entry.size
+            } else {
+                break
             }
         }
     }
@@ -244,6 +261,8 @@ public class Cache {
     }
 
 }
+
+// A bunch of extensions to common types to make them Cacheable.
 
 extension String: Cacheable {
     public func encodeForCache() -> NSData {
