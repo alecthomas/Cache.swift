@@ -52,6 +52,7 @@ public class Cache {
         let size: Int
     }
 
+    internal let fileManager = NSFileManager.defaultManager()
     internal let background = dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0)
     internal let queue = dispatch_queue_create("com.compass.Cache", DISPATCH_QUEUE_SERIAL)
     internal let root: String
@@ -63,7 +64,6 @@ public class Cache {
 
     public init(name: String, directory: String? = nil, options: Options = Options()) {
         let root: String = directory ?? NSSearchPathForDirectoriesInDomains(.CachesDirectory, .UserDomainMask, true).first! as! String
-        let fileManager = NSFileManager.defaultManager()
 
         self.options = options
         self.root = root.stringByAppendingPathComponent("\(name).cache")
@@ -145,7 +145,7 @@ public class Cache {
     public func deleteAll() {
         dispatch_sync(queue, {
             self.purgeCache()
-            NSFileManager.defaultManager().createDirectoryAtPath(self.root, withIntermediateDirectories: true, attributes: nil, error: nil)
+            self.fileManager.createDirectoryAtPath(self.root, withIntermediateDirectories: true, attributes: nil, error: nil)
 
         })
     }
@@ -179,13 +179,13 @@ public class Cache {
 
     private func purgeKey(key: String) {
         if let entry = self.metadata[key] {
-            if self.cache.removeValueForKey(key) != nil {
-                self.memorySize -= entry.size
+            if cache.removeValueForKey(key) != nil {
+                memorySize -= entry.size
             }
-            self.metadata.removeValueForKey(key)
+            metadata.removeValueForKey(key)
             let path = self.pathForKey(key)
-            NSFileManager.defaultManager().removeItemAtPath(path, error: nil)
-            self.diskSize -= entry.size
+            fileManager.removeItemAtPath(path, error: nil)
+            diskSize -= entry.size
         }
     }
     
@@ -236,7 +236,6 @@ public class Cache {
 
     private func contentsOfDirectoryAtPath(path: String) -> [String] {
         var error: NSError? = nil
-        let fileManager = NSFileManager.defaultManager()
         if let contents = fileManager.contentsOfDirectoryAtPath(path, error: &error) {
             if let filenames = contents as? [String] {
                 return filenames
