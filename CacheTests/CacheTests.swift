@@ -20,7 +20,7 @@ class CacheTests: XCTestCase {
     }
 
     func testCacheMemoryLimit() {
-        let options = Cache.Options(memoryLimit: 4, diskLimit: 1024 * 1024)
+        let options = Cache.Options(memoryByteLimit: 4, diskByteLimit: 1024 * 1024)
         let cache = Cache(name: "test", options: options)
         cache.set("a", value: "test")
         cache.set("b", value: "b")
@@ -30,7 +30,7 @@ class CacheTests: XCTestCase {
     }
 
     func testCacheDiskLimit() {
-        let options = Cache.Options(memoryLimit: 4, diskLimit: 4)
+        let options = Cache.Options(memoryByteLimit: 4, diskByteLimit: 4)
         let cache = Cache(name: "test", options: options)
         cache.set("a", value: "test")
         cache.set("b", value: "b")
@@ -41,8 +41,8 @@ class CacheTests: XCTestCase {
 
     func testCustomCostFunction() {
         let options = Cache.Options(
-            memoryLimit: 4,
-            diskLimit: 4,
+            memoryByteLimit: 4,
+            diskByteLimit: 4,
             costFunction: {e in Float64(e.size)}
         )
         let cache = Cache(name: "test", options: options)
@@ -61,5 +61,14 @@ class CacheTests: XCTestCase {
         XCTAssertEqual(cacheb.keys, ["a", "b"])
         XCTAssertEqual(cacheb.residentKeys, [])
         XCTAssertEqual(cachea.diskSize, cacheb.diskSize)
+    }
+
+    func testIntCacheable() {
+        let cache = Cache(name: "test")
+        cache.set("a", value: 10)
+        let a: Int? = cache.get("a")
+        XCTAssertNotNil(a)
+        XCTAssertEqual(a!, 10)
+        XCTAssertEqual(cache.memorySize, sizeof(Int))
     }
 }

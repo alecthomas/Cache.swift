@@ -12,6 +12,12 @@ import Foundation
 import UIKit
 #endif
 
+// Objects conforming to this protocol may be cached.
+public protocol Cacheable {
+    func encodeForCache() -> NSData
+    static func decodeFromCache(data: NSData) -> Any?
+}
+
 // An in-memory and disk-backed cache with separate limits for both.
 public class Cache {
     public typealias CostFunction = (CacheEntry) -> Float64
@@ -20,22 +26,22 @@ public class Cache {
     public struct Options {
         // The maximum in-memory size of the cache (in bytes).
         // Note that this is based on the encoded size of the objects.
-        public var memoryLimit: UInt64
+        public var memoryByteLimit: Int
 
         // The maximum disk size of the cache (in bytes).
-        public var diskLimit: UInt64
+        public var diskByteLimit: Int
 
         // Used to return a cost for the entry. Lower cost objects will be evicted first.
         // Defaults to time-based cost, where older entries have a higher cost.
         public var costFunction: CostFunction
 
         public init(
-            memoryLimit: UInt64 = 1024 * 1024,              // 1MB
-            diskLimit: UInt64 = 1024 * 1024 * 10,           // 10MB
+            memoryByteLimit: Int = 1024 * 1024,              // 1MB
+            diskByteLimit: Int = 1024 * 1024 * 10,           // 10MB
             costFunction: CostFunction = {e in e.ctime}
         ) {
-            self.memoryLimit = memoryLimit
-            self.diskLimit = diskLimit
+            self.memoryByteLimit = memoryByteLimit
+            self.diskByteLimit = diskByteLimit
             self.costFunction = costFunction
         }
     }
@@ -43,7 +49,7 @@ public class Cache {
     public struct CacheEntry {
         let key: String
         let ctime: NSTimeInterval
-        let size: UInt64
+        let size: Int
     }
 
     internal let background = dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0)
@@ -52,8 +58,8 @@ public class Cache {
     internal var metadata: [String:CacheEntry] = [:]
     internal let options: Options
     internal var cache: [String:Any] = [:]
-    internal var diskSize: UInt64 = 0
-    internal var memorySize: UInt64 = 0
+    internal var diskSize: Int = 0
+    internal var memorySize: Int = 0
 
     public init(name: String, directory: String? = nil, options: Options = Options()) {
         let root: String = directory ?? NSSearchPathForDirectoriesInDomains(.CachesDirectory, .UserDomainMask, true).first! as! String
@@ -70,10 +76,10 @@ public class Cache {
                 let ctime = attr[NSFileCreationDate] as! NSDate
                 let size = attr[NSFileSize] as! NSNumber
 
-                self.diskSize += size.unsignedLongLongValue
+                self.diskSize += size.integerValue
 
                 let key = keyForPath(file.lastPathComponent)
-                metadata[key] = CacheEntry(key: key, ctime: ctime.timeIntervalSince1970, size: size.unsignedLongLongValue)
+                metadata[key] = CacheEntry(key: key, ctime: ctime.timeIntervalSince1970, size: size.integerValue)
             }
         }
 
@@ -87,29 +93,28 @@ public class Cache {
 #endif
     }
 
+    // All cached keys.
     public var keys: [String] {
         var out: [String] = []
         dispatch_sync(queue, { out = self.metadata.keys.array.sorted({a, b in a < b}) })
         return out
     }
 
+    // All in-memory keys.
     public var residentKeys: [String] {
         var out: [String] = []
         dispatch_sync(queue, { out = self.cache.keys.array.sorted({a, b in a < b}) })
         return out
     }
 
-    public func get<T: NSCoding>(key: String) -> T? {
-        return getWithDecodingFunction(key, decoder: decodeWithNSCoder)
-    }
-
-    public func getWithDecodingFunction<T>(key: String, decoder: (NSData) -> T?) -> T? {
+    // Get an object from the cache.
+    public func get<T: Cacheable>(key: String) -> T? {
         var value: T?
         dispatch_sync(queue, {
             if let v = self.cache[key] {
                 value = v as? T
             } else if let entry = self.metadata[key], let data = NSData(contentsOfFile: self.pathForKey(key)) {
-                value = decoder(data)
+                value = T.decodeFromCache(data) as! T?
                 if value != nil {
                     self.cache[key] = value!
                     self.memorySize += entry.size
@@ -119,52 +124,14 @@ public class Cache {
         return value
     }
 
-    internal func decodeWithNSCoder<T>(data: NSData) -> T? {
-        if let v: T? = NSKeyedUnarchiver(forReadingWithData: data).decodeObject() as? T {
-            return v
-        }
-        return nil
-    }
-
     // Set a value in the cache.
-    public func set<T: NSCoding>(key: String, value: T) {
-        return setWithEncodingFunction(key, value: value, encoder: self.encodeWithNSCoder)
-    }
-
-    public func setWithEncodingFunction<T>(key: String, value: T, encoder: (T) -> NSData) {
+    public func set<T: Cacheable>(key: String, value: T) {
         dispatch_sync(queue, {
-            let data = encoder(value)
+            let data = value.encodeForCache()
             let path = self.pathForKey(key)
             data.writeToFile(path, atomically: true)
-            self.setValueWithPath(key, value: value, path: path, size: UInt64(data.length))
+            self.setValueWithPath(key, value: value, path: path, size: Int(data.length))
         })
-    }
-
-    internal func encodeWithNSCoder<T: NSCoding>(value: T) -> NSData {
-        var data = NSMutableData()
-        let archiver = NSKeyedArchiver(forWritingWithMutableData: data)
-        archiver.encodeObject(value)
-        archiver.finishEncoding()
-        return data
-    }
-
-    private func setValueWithPath<T>(key: String, value: T, path: String, size: UInt64) {
-        // Update bookkeeping.
-        if let entry = self.metadata[key] {
-            self.diskSize -= entry.size
-            if self.cache[key] != nil {
-                self.memorySize -= entry.size
-            }
-        }
-
-        self.cache[key] = value
-        let entry = CacheEntry(key: key, ctime: NSDate().timeIntervalSince1970, size: size)
-        self.metadata[key] = entry
-
-        self.memorySize += entry.size
-        self.diskSize += entry.size
-
-        self.maybePurge()
     }
 
     // Delete a key from the cache.
@@ -172,18 +139,6 @@ public class Cache {
         dispatch_sync(queue, {
             self.purgeKey(key)
         })
-    }
-
-    private func purgeKey(key: String) {
-        if let entry = self.metadata[key] {
-            if self.cache.removeValueForKey(key) != nil {
-                self.memorySize -= entry.size
-            }
-            self.metadata.removeValueForKey(key)
-            let path = self.pathForKey(key)
-            NSFileManager.defaultManager().removeItemAtPath(path, error: nil)
-            self.diskSize -= entry.size
-        }
     }
 
     // Delete everything from the cache.
@@ -203,6 +158,37 @@ public class Cache {
         })
     }
 
+    private func setValueWithPath<T>(key: String, value: T, path: String, size: Int) {
+        // Update bookkeeping.
+        if let entry = self.metadata[key] {
+            self.diskSize -= entry.size
+            if self.cache[key] != nil {
+                self.memorySize -= entry.size
+            }
+        }
+
+        self.cache[key] = value
+        let entry = CacheEntry(key: key, ctime: NSDate().timeIntervalSince1970, size: size)
+        self.metadata[key] = entry
+
+        self.memorySize += entry.size
+        self.diskSize += entry.size
+
+        self.maybePurge()
+    }
+
+    private func purgeKey(key: String) {
+        if let entry = self.metadata[key] {
+            if self.cache.removeValueForKey(key) != nil {
+                self.memorySize -= entry.size
+            }
+            self.metadata.removeValueForKey(key)
+            let path = self.pathForKey(key)
+            NSFileManager.defaultManager().removeItemAtPath(path, error: nil)
+            self.diskSize -= entry.size
+        }
+    }
+    
     private func purgeCache() {
         NSFileManager.defaultManager().removeItemAtPath(self.root, error: nil)
         self.metadata = [:]
@@ -220,14 +206,14 @@ public class Cache {
 
     // Must be called in the lock queue.
     private func maybePurge() {
-        if memorySize > options.memoryLimit || diskSize > options.diskLimit {
+        if memorySize > options.memoryByteLimit || diskSize > options.diskByteLimit {
             let entries = self.metadata.values.array.sorted({(a, b) in
                 self.options.costFunction(a) < self.options.costFunction(b)
             })
             for entry in entries {
-                if diskSize > options.diskLimit {
+                if diskSize > options.diskByteLimit {
                     purgeKey(entry.key)
-                } else if memorySize > options.memoryLimit {
+                } else if memorySize > options.memoryByteLimit {
                     cache.removeValueForKey(entry.key)
                     memorySize -= entry.size
                 } else {
@@ -261,29 +247,37 @@ public class Cache {
 
 }
 
-// Some common specialisations.
-extension Cache {
-    public func set(key: String, value: String) {
-        setWithEncodingFunction(key, value: value, encoder: {value in
-            (value as NSString).dataUsingEncoding(NSUTF8StringEncoding)!
-        })
+extension String: Cacheable {
+    public func encodeForCache() -> NSData {
+        return self.dataUsingEncoding(NSUTF8StringEncoding)!
     }
 
-    public func get(key: String) -> String? {
-        return getWithDecodingFunction(key, decoder: {data in
-            NSString(data: data, encoding: NSUTF8StringEncoding) as! String?
-        })
+    public static func decodeFromCache(data: NSData) -> Any? {
+        return NSString(data: data, encoding: NSUTF8StringEncoding)
+    }
+}
+
+extension Int: Cacheable {
+    public func encodeForCache() -> NSData {
+        var n = self
+        return NSData(bytes: &n, length: sizeof(Int))
     }
 
-    public func set(key: String, value: NSString) {
-        setWithEncodingFunction(key, value: value, encoder: {value in
-            value.dataUsingEncoding(NSUTF8StringEncoding)!
-        })
+    public static func decodeFromCache(data: NSData) -> Any? {
+        return 1
+    }
+}
+
+extension NSCoder: Cacheable {
+    public func encodeForCache() -> NSData {
+        var data = NSMutableData()
+        let archiver = NSKeyedArchiver(forWritingWithMutableData: data)
+        archiver.encodeObject(self)
+        archiver.finishEncoding()
+        return data
     }
 
-    public func get(key: String) -> NSString? {
-        return getWithDecodingFunction(key, decoder: {data in
-            NSString(data: data, encoding: NSUTF8StringEncoding)
-        })
+    public static func decodeFromCache(data: NSData) -> Any? {
+        return NSKeyedUnarchiver(forReadingWithData: data).decodeObject()
     }
 }
