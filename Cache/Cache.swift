@@ -8,6 +8,9 @@
 //
 
 import Foundation
+#if os(iOS)
+import UIKit
+#endif
 
 // An in-memory and disk-backed cache with separate limits for both.
 public class Cache {
