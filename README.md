@@ -20,7 +20,7 @@ Here's an example with RAM and disk limits set to 4 bytes, for illustrative
 purposes:
 
 ```swift
-let options = Cache.Options(memoryLimit: 4, diskLimit: 4)
+let options = Cache.Options(memoryByteLimit: 4, diskByteLimit: 4)
 let cache = Cache(name: "test", options: options)
 cache.set("a", value: "test")
 cache.set("b", value: "b")                                // "a" is evicted here
