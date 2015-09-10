@@ -46,7 +46,7 @@ public class Cache {
         }
     }
 
-    public class CacheEntry {
+    public struct CacheEntry {
         public let key: String
         public let ctime: NSTimeInterval
         public let size: Int
@@ -68,22 +68,25 @@ public class Cache {
     internal var memorySize: Int = 0
 
     public init(name: String, directory: String? = nil, options: Options = Options()) {
-        let root: String = directory ?? NSSearchPathForDirectoriesInDomains(.CachesDirectory, .UserDomainMask, true).first! as! String
+        let root: String = directory ?? NSSearchPathForDirectoriesInDomains(.CachesDirectory, .UserDomainMask, true).first! 
 
         self.options = options
-        self.root = root.stringByAppendingPathComponent("\(name).cache")
-
-        fileManager.createDirectoryAtPath(self.root, withIntermediateDirectories: true, attributes: nil, error: nil)
+        self.root = (root as NSString).stringByAppendingPathComponent("\(name).cache")
+        
+        do {
+            try fileManager.createDirectoryAtPath(self.root, withIntermediateDirectories: true, attributes: nil)
+        } catch _ {
+        }
 
         for file in contentsOfDirectoryAtPath(self.root) {
-            let path = self.root.stringByAppendingPathComponent(file)
-            if let attr = fileManager.attributesOfItemAtPath(path, error: nil) {
+            let path = (self.root as NSString).stringByAppendingPathComponent(file)
+            if let attr = try? fileManager.attributesOfItemAtPath(path) {
                 let ctime = attr[NSFileCreationDate] as! NSDate
                 let size = attr[NSFileSize] as! NSNumber
 
                 self.diskSize += size.integerValue
 
-                let key = keyForPath(file.lastPathComponent)
+                let key = keyForPath((file as NSString).lastPathComponent)
                 metadata[key] = CacheEntry(key: key, ctime: ctime.timeIntervalSince1970, size: size.integerValue)
             }
         }
@@ -101,14 +104,14 @@ public class Cache {
     // All cached keys.
     public var keys: [String] {
         var out: [String] = []
-        dispatch_sync(queue, { out = self.metadata.keys.array.sorted({a, b in a < b}) })
+        dispatch_sync(queue, { out = Array(self.metadata.keys).sort({a, b in a < b}) })
         return out
     }
 
     // All in-memory keys.
     public var residentKeys: [String] {
         var out: [String] = []
-        dispatch_sync(queue, { out = self.cache.keys.array.sorted({a, b in a < b}) })
+        dispatch_sync(queue, { out = Array(self.cache.keys).sort({a, b in a < b}) })
         return out
     }
 
@@ -159,7 +162,10 @@ public class Cache {
     public func deleteAll() {
         dispatch_sync(queue, {
             self.purgeCache()
-            self.fileManager.createDirectoryAtPath(self.root, withIntermediateDirectories: true, attributes: nil, error: nil)
+            do {
+                try self.fileManager.createDirectoryAtPath(self.root, withIntermediateDirectories: true, attributes: nil)
+            } catch _ {
+            }
 
         })
     }
@@ -198,13 +204,19 @@ public class Cache {
             }
             metadata.removeValueForKey(key)
             let path = self.pathForKey(key)
-            fileManager.removeItemAtPath(path, error: nil)
+            do {
+                try fileManager.removeItemAtPath(path)
+            } catch _ {
+            }
             diskSize -= entry.size
         }
     }
     
     private func purgeCache() {
-        fileManager.removeItemAtPath(self.root, error: nil)
+        do {
+            try fileManager.removeItemAtPath(self.root)
+        } catch _ {
+        }
         self.metadata = [:]
         self.cache = [:]
         self.memorySize = 0
@@ -224,7 +236,7 @@ public class Cache {
             return
         }
 
-        let entries = self.metadata.values.array.sorted({(a, b) in
+        let entries = Array(self.metadata.values).sort({(a, b) in
             self.options.costFunction(a) < self.options.costFunction(b)
         })
         for entry in entries {
@@ -241,21 +253,20 @@ public class Cache {
 
     private func pathForKey(key: String) -> String {
         let last = key.dataUsingEncoding(NSUTF8StringEncoding)!.base64EncodedStringWithOptions(
-            NSDataBase64EncodingOptions.allZeros)
-        return root.stringByAppendingPathComponent(last)
+            NSDataBase64EncodingOptions())
+        return (root as NSString).stringByAppendingPathComponent(last)
      }
 
     private func keyForPath(path: String) -> String {
-        let data = NSData(base64EncodedString: path.lastPathComponent, options: NSDataBase64DecodingOptions.allZeros)!
-        return NSString(data: data, encoding: NSUTF8StringEncoding)! as! String
+        let data = NSData(base64EncodedString: (path as NSString).lastPathComponent, options: NSDataBase64DecodingOptions())!
+        return NSString(data: data, encoding: NSUTF8StringEncoding)! as String
     }
 
     private func contentsOfDirectoryAtPath(path: String) -> [String] {
-        var error: NSError? = nil
-        if let contents = fileManager.contentsOfDirectoryAtPath(path, error: &error) {
-            if let filenames = contents as? [String] {
-                return filenames
-            }
+        do {
+            return try fileManager.contentsOfDirectoryAtPath(path)
+        } catch {
+            print(error)
         }
         return []
     }
@@ -287,7 +298,7 @@ extension Int: Cacheable {
 
 extension NSCoder: Cacheable {
     public func encodeForCache() -> NSData {
-        var data = NSMutableData()
+        let data = NSMutableData()
         let archiver = NSKeyedArchiver(forWritingWithMutableData: data)
         archiver.encodeObject(self)
         archiver.finishEncoding()
