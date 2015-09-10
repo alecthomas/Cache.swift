@@ -46,7 +46,7 @@ public class Cache {
         }
     }
 
-    public class CacheEntry {
+    public struct CacheEntry {
         public let key: String
         public let ctime: NSTimeInterval
         public let size: Int
