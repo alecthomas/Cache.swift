@@ -72,11 +72,8 @@ public class Cache {
 
         self.options = options
         self.root = (root as NSString).stringByAppendingPathComponent("\(name).cache")
-        
-        do {
-            try fileManager.createDirectoryAtPath(self.root, withIntermediateDirectories: true, attributes: nil)
-        } catch _ {
-        }
+
+        let _ = try? fileManager.createDirectoryAtPath(self.root, withIntermediateDirectories: true, attributes: nil)
 
         for file in contentsOfDirectoryAtPath(self.root) {
             let path = (self.root as NSString).stringByAppendingPathComponent(file)
@@ -104,14 +101,14 @@ public class Cache {
     // All cached keys.
     public var keys: [String] {
         var out: [String] = []
-        dispatch_sync(queue, { out = Array(self.metadata.keys).sort({a, b in a < b}) })
+        dispatch_sync(queue, { out = self.metadata.keys.sort({a, b in a < b}) })
         return out
     }
 
     // All in-memory keys.
     public var residentKeys: [String] {
         var out: [String] = []
-        dispatch_sync(queue, { out = Array(self.cache.keys).sort({a, b in a < b}) })
+        dispatch_sync(queue, { out = self.cache.keys.sort({a, b in a < b}) })
         return out
     }
 
@@ -162,11 +159,7 @@ public class Cache {
     public func deleteAll() {
         dispatch_sync(queue, {
             self.purgeCache()
-            do {
-                try self.fileManager.createDirectoryAtPath(self.root, withIntermediateDirectories: true, attributes: nil)
-            } catch _ {
-            }
-
+            let _ = try? self.fileManager.createDirectoryAtPath(self.root, withIntermediateDirectories: true, attributes: nil)
         })
     }
 
@@ -204,19 +197,13 @@ public class Cache {
             }
             metadata.removeValueForKey(key)
             let path = self.pathForKey(key)
-            do {
-                try fileManager.removeItemAtPath(path)
-            } catch _ {
-            }
+            let _ = try? fileManager.removeItemAtPath(path)
             diskSize -= entry.size
         }
     }
     
     private func purgeCache() {
-        do {
-            try fileManager.removeItemAtPath(self.root)
-        } catch _ {
-        }
+        let _ = try? fileManager.removeItemAtPath(self.root)
         self.metadata = [:]
         self.cache = [:]
         self.memorySize = 0
@@ -236,7 +223,7 @@ public class Cache {
             return
         }
 
-        let entries = Array(self.metadata.values).sort({(a, b) in
+        let entries = self.metadata.values.sort({(a, b) in
             self.options.costFunction(a) < self.options.costFunction(b)
         })
         for entry in entries {
@@ -266,9 +253,8 @@ public class Cache {
         do {
             return try fileManager.contentsOfDirectoryAtPath(path)
         } catch {
-            print(error)
+            return []
         }
-        return []
     }
 
 }
